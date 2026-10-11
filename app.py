@@ -32,7 +32,7 @@ logger = logging.getLogger("SessionChecker")
 # ----------------- КОНФИГУРАЦИЯ ПО УМОЛЧАНИЮ -----------------
 # Вы можете указать BOT_TOKEN, API_ID и API_HASH через переменные окружения
 # или задать их прямо здесь:
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8697905230:AAEJf-ExJXNeK1DI3AKLnMw0ztkXsEgsqbI")
 # API ID и HASH можно получить на my.telegram.org (или использовать стандартные)
 DEFAULT_API_ID = int(os.getenv("API_ID", "2040")) # Стандартный Telegram
 Android/Desktop ID DEFAULT_API_HASH = os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627")
