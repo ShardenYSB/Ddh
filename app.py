@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger("SessionChecker")
 
 # ----------------- КОНФИГУРАЦИЯ ПО УМОЛЧАНИЮ -----------------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8697905230:AAEJf-ExJXNeK1DI3AKLnMw0ztkXsEgsqbI")
 DEFAULT_API_ID = int(os.getenv("API_ID", "2040"))
 DEFAULT_API_HASH = os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627")
 MAX_SESSIONS_PER_BATCH = 100
