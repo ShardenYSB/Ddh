@@ -1,7 +1,7 @@
 """
 Telegram Session Checker Bot (Aiogram 3 + Telethon)
 ===================================================
-Бот и скрипт для проверки Telegram .session файлов (по отдельности или в .zip до 100 шт.).
+Бот и скрипт для проверки Telegram .session файлов (по отдельности или в .zip).
 """
 import os
 import sys
@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger("SessionChecker")
 
 # ----------------- КОНФИГУРАЦИЯ ПО УМОЛЧАНИЮ -----------------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8697905230:AAGkLc5EkXnT-SwovPjhcN9tmL8bQdrA0gA")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8697905230:AAEJf-ExJXNeK1DI3AKLnMw0ztkXsEgsqbI")
 DEFAULT_API_ID = int(os.getenv("API_ID", "2040"))
 DEFAULT_API_HASH = os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627")
 MAX_SESSIONS_PER_BATCH = 100
@@ -271,10 +271,10 @@ def create_bot_app():
             "👋 <b>Привет! Я бот для проверки Telegram-сессий.</b>\n\n"
             "🔍 <b>Что я умею:</b>\n"
             "1. Заходить в сессию и определять, живой ли аккаунт.\n"
-            "2. Показывать <b>общее количество сессий</b> на аккаунте.\n"
-            "3. Показывать <b>активность каждой сессии</b> (устройство, IP, время в сети).\n"
-            "4. Принимать одиночный <code>.session</code> файл или <code>.zip</code> архив.\n\n"
-            "Отправьте мне файл сессии или архив для начала проверки!",
+            "2. Показывать общее количество сессий на аккаунте.\n"
+            "3. Показывать активность каждой сессии (устройство, IP, время в сети).\n"
+            "4. Разделять и присылать архивы: чистые (1 сессия) и подозрительные (>1 сессии).\n\n"
+            "Отправьте мне <code>.session</code> файл или <code>.zip</code> архив!",
             parse_mode="HTML"
         )
 
@@ -282,10 +282,10 @@ def create_bot_app():
     async def handle_document(message: types.Message):
         doc = message.document
         if not (doc.file_name.endswith(".session") or doc.file_name.endswith(".zip")):
-            await message.reply("❌ Пожалуйста, отправьте файл с расширением <code>.session</code> или <code>.zip</code> архив.")
+            await message.reply("❌ Пожалуйста, отправьте файл с расширением <code>.session</code> или <code>.zip</code> архив.", parse_mode="HTML")
             return
 
-        work_dir = Path(f"temp_{message.chat.id}_{datetime.now().strftime('%s')}")
+        work_dir = Path(f"temp_{message.chat.id}_{int(datetime.now().timestamp())}")
         work_dir.mkdir(parents=True, exist_ok=True)
         status_msg = await message.reply("⏳ Загружаю файл...")
 
@@ -298,7 +298,7 @@ def create_bot_app():
                     z.extractall(work_dir)
                 all_sessions = list(work_dir.rglob("*.session"))
                 if not all_sessions:
-                    await status_msg.edit_text("❌ В архиве не найдено файлов <code>.session</code>.")
+                    await status_msg.edit_text("❌ В архиве не найдено файлов <code>.session</code>.", parse_mode="HTML")
                     return
                 session_files = [str(p) for p in all_sessions[:MAX_SESSIONS_PER_BATCH]]
             else:
@@ -316,8 +316,31 @@ def create_bot_app():
                     except Exception:
                         pass
 
-            await status_msg.edit_text(f"🚀 Начинаю проверку {total_count} сессий...")
+            await status_msg.edit_text(f"🚀 Начинаю проверку {total_count} сессий...", parse_mode="HTML")
             results = await engine.check_multiple_sessions(session_files, progress_callback=progress)
+
+            # Папки для сортировки файлов
+            single_session_dir = work_dir / "single_session"
+            multi_session_dir = work_dir / "multi_sessions"
+            single_session_dir.mkdir(exist_ok=True)
+            multi_session_dir.mkdir(exist_ok=True)
+
+            single_count = 0
+            multi_count = 0
+
+            # Распределение исходных .session файлов по папкам
+            for res, s_path in zip(results, session_files):
+                source_file = Path(s_path)
+                if not source_file.exists():
+                    continue
+
+                if res["is_valid"]:
+                    if res["total_sessions_count"] == 1:
+                        shutil.copy2(source_file, single_session_dir / source_file.name)
+                        single_count += 1
+                    else:
+                        shutil.copy2(source_file, multi_session_dir / source_file.name)
+                        multi_count += 1
 
             if total_count == 1:
                 text = format_single_result_text(results[0])
@@ -327,21 +350,47 @@ def create_bot_app():
             else:
                 valid_count = sum(1 for r in results if r["is_valid"])
                 invalid_count = total_count - valid_count
-                multi_session_accounts = sum(1 for r in results if r.get("other_sessions_count", 0) > 0)
                 summary_text = (
                     f"✅ <b>Проверка завершена!</b>\n\n"
                     f"📦 Всего проверено файлов: <b>{total_count}</b>\n"
                     f"🟢 Живых / Валидных: <b>{valid_count}</b>\n"
-                    f"🔴 Невалидных / Ошибок: <b>{invalid_count}</b>\n"
-                    f"⚠️ Аккаунтов с посторонними сессиями (>1): <b>{multi_session_accounts}</b>"
+                    f"🔴 Невалидных / Ошибок: <b>{invalid_count}</b>\n\n"
+                    f"🔒 <b>Только 1 сессия (чистые):</b> <b>{single_count}</b> шт.\n"
+                    f"⚠️ <b>Много сессий (>1):</b> <b>{multi_count}</b> шт."
                 )
                 await status_msg.edit_text(summary_text, parse_mode="HTML")
 
                 if pd is not None:
                     excel_path = work_dir / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                     generate_excel_report(results, str(excel_path))
-                    doc_to_send = FSInputFile(str(excel_path), filename=excel_path.name)
-                    await message.reply_document(doc_to_send, caption=f"📑 Подробный Excel-отчет ({total_count} сессий)")
+                    await message.reply_document(
+                        FSInputFile(str(excel_path), filename=excel_path.name),
+                        caption=f"📑 Excel-отчет ({total_count} сессий)"
+                    )
+
+            # Отправка архива с 1 сессией
+            if single_count > 0:
+                zip_single_path = work_dir / "single_sessions.zip"
+                with zipfile.ZipFile(zip_single_path, "w", zipfile.ZIP_DEFLATED) as z:
+                    for f in single_session_dir.glob("*.session"):
+                        z.write(f, arcname=f.name)
+                await message.reply_document(
+                    FSInputFile(str(zip_single_path), filename="single_sessions.zip"),
+                    caption=f"🟢 <b>Сессии с 1 подключением</b> ({single_count} шт.)",
+                    parse_mode="HTML"
+                )
+
+            # Отправка архива с несколькими сессиями
+            if multi_count > 0:
+                zip_multi_path = work_dir / "multi_sessions.zip"
+                with zipfile.ZipFile(zip_multi_path, "w", zipfile.ZIP_DEFLATED) as z:
+                    for f in multi_session_dir.glob("*.session"):
+                        z.write(f, arcname=f.name)
+                await message.reply_document(
+                    FSInputFile(str(zip_multi_path), filename="multi_sessions.zip"),
+                    caption=f"⚠️ <b>Сессии с несколькими подключениями</b> ({multi_count} шт.)",
+                    parse_mode="HTML"
+                )
 
         except Exception as e:
             logger.exception("Ошибка при обработке файлов:")
