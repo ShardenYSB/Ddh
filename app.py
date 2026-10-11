@@ -37,8 +37,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8697905230:AAEJf-ExJXNeK1DI3AKLnMw0ztkXsEgsq
 DEFAULT_API_ID = int(os.getenv("API_ID", "2040")) # Стандартный Telegram
 Android/Desktop ID DEFAULT_API_HASH = os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627")
 MAX_SESSIONS_PER_BATCH = 100
-CONCURRENCY_LIMIT = 5 # Количество одновременных проверок (для защиты от
-флудвейтов)
+CONCURRENCY_LIMIT = 5 # Количество одновременных проверок (для защиты отфлудвейтов)
 # -------------------------------------------------------------
 # Проверка наличия библиотек
 try:
