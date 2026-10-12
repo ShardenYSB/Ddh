@@ -26,8 +26,8 @@ logger = logging.getLogger("SessionChecker")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8697905230:AAFTMruUSZO09mSxskidhvsp7MnTTty4Byo")
 DEFAULT_API_ID = int(os.getenv("API_ID", "2040"))
 DEFAULT_API_HASH = os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627")
-MAX_SESSIONS_PER_BATCH = 100
-CONCURRENCY_LIMIT = 5
+MAX_SESSIONS_PER_BATCH = 1000
+CONCURRENCY_LIMIT = 8
 
 # ----------------- ПРОВЕРКА БИБЛИОТЕК -----------------
 try:
