@@ -28,6 +28,7 @@ DEFAULT_API_ID = int(os.getenv("API_ID", "2040"))
 DEFAULT_API_HASH = os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627")
 MAX_SESSIONS_PER_BATCH = 1000
 CONCURRENCY_LIMIT = 8
+REQUEST_TIMEOUT_SECONDS = 25
 
 # ----------------- ПРОВЕРКА БИБЛИОТЕК -----------------
 try:
@@ -82,83 +83,91 @@ class SessionCheckerEngine:
             "authorizations": []
         }
 
-        async with self.semaphore:
-            client = TelegramClient(session_str, self.api_id, self.api_hash)
-            try:
-                await client.connect()
-                if not await client.is_user_authorized():
-                    result["status"] = "Unauthorized / Revoked"
-                    result["error_message"] = "Сессия не авторизована или отозвана"
-                    return result
-
-                me = await client.get_me()
-                if not me:
-                    result["status"] = "Empty User"
-                    result["error_message"] = "Не удалось получить профиль пользователя"
-                    return result
-
-                result["is_valid"] = True
-                result["status"] = "Active / Valid"
-                result["user_id"] = me.id
-                result["phone"] = f"+{me.phone}" if me.phone else "N/A"
-                result["username"] = f"@{me.username}" if me.username else "N/A"
-                result["first_name"] = me.first_name or "N/A"
-
-                auths_resp = await client(GetAuthorizationsRequest())
-                authorizations_list = auths_resp.authorizations
-
-                result["total_sessions_count"] = len(authorizations_list)
-                result["other_sessions_count"] = max(0, len(authorizations_list) - 1)
-
-                auth_records = []
-                for auth in authorizations_list:
-                    date_active_dt = auth.date_active
-                    date_created_dt = auth.date_created
-                    date_active_str = date_active_dt.strftime("%Y-%m-%d %H:%M:%S UTC") if date_active_dt else "N/A"
-                    date_created_str = date_created_dt.strftime("%Y-%m-%d %H:%M:%S UTC") if date_created_dt else "N/A"
-
-                    record = {
-                        "is_current": getattr(auth, 'current', False),
-                        "hash": getattr(auth, 'hash', None),
-                        "device_model": getattr(auth, 'device_model', 'Unknown device'),
-                        "platform": getattr(auth, 'platform', 'Unknown platform'),
-                        "system_version": getattr(auth, 'system_version', ''),
-                        "app_name": getattr(auth, 'app_name', 'Telegram App'),
-                        "app_version": getattr(auth, 'app_version', ''),
-                        "ip": getattr(auth, 'ip', 'N/A'),
-                        "country": getattr(auth, 'country', 'N/A'),
-                        "region": getattr(auth, 'region', 'N/A'),
-                        "date_created": date_created_str,
-                        "date_active": date_active_str,
-                        "raw_date_active": date_active_dt
-                    }
-                    auth_records.append(record)
-
-                auth_records.sort(
-                    key=lambda x: (not x["is_current"], -(x["raw_date_active"].timestamp() if x["raw_date_active"] else 0))
-                )
-                result["authorizations"] = auth_records
-
-            except (AuthKeyUnregisteredError, SessionRevokedError):
-                result["status"] = "Dead / Revoked"
-                result["error_message"] = "Ключ авторизации недействителен (сессия удалена)"
-            except (UserDeactivatedError, UserDeactivatedBanError):
-                result["status"] = "Banned / Deactivated"
-                result["error_message"] = "Аккаунт заблокирован или удален Telegram"
-            except SessionPasswordNeededError:
-                result["status"] = "2FA Password Needed"
-                result["error_message"] = "Требуется пароль двухфакторной аутентификации"
-            except FloodWaitError as e:
-                result["status"] = "FloodWait"
-                result["error_message"] = f"Лимит запросов Telegram, ожидание {e.seconds} сек."
-            except Exception as e:
-                result["status"] = "Error"
-                result["error_message"] = f"{type(e).__name__}: {str(e)}"
-            finally:
+        client = None
+        try:
+            async with self.semaphore:
+                client = TelegramClient(session_str, self.api_id, self.api_hash)
                 try:
-                    await client.disconnect()
-                except Exception:
-                    pass
+                    await asyncio.wait_for(client.connect(), timeout=REQUEST_TIMEOUT_SECONDS)
+                    if not await asyncio.wait_for(client.is_user_authorized(), timeout=REQUEST_TIMEOUT_SECONDS):
+                        result["status"] = "Unauthorized / Revoked"
+                        result["error_message"] = "Сессия не авторизована или отозвана"
+                        return result
+
+                    me = await asyncio.wait_for(client.get_me(), timeout=REQUEST_TIMEOUT_SECONDS)
+                    if not me:
+                        result["status"] = "Empty User"
+                        result["error_message"] = "Не удалось получить профиль пользователя"
+                        return result
+
+                    result["is_valid"] = True
+                    result["status"] = "Active / Valid"
+                    result["user_id"] = me.id
+                    result["phone"] = f"+{me.phone}" if me.phone else "N/A"
+                    result["username"] = f"@{me.username}" if me.username else "N/A"
+                    result["first_name"] = me.first_name or "N/A"
+
+                    auths_resp = await asyncio.wait_for(client(GetAuthorizationsRequest()), timeout=REQUEST_TIMEOUT_SECONDS)
+                    authorizations_list = auths_resp.authorizations
+
+                    result["total_sessions_count"] = len(authorizations_list)
+                    result["other_sessions_count"] = max(0, len(authorizations_list) - 1)
+
+                    auth_records = []
+                    for auth in authorizations_list:
+                        date_active_dt = auth.date_active
+                        date_created_dt = auth.date_created
+                        date_active_str = date_active_dt.strftime("%Y-%m-%d %H:%M:%S UTC") if date_active_dt else "N/A"
+                        date_created_str = date_created_dt.strftime("%Y-%m-%d %H:%M:%S UTC") if date_created_dt else "N/A"
+
+                        record = {
+                            "is_current": getattr(auth, 'current', False),
+                            "hash": getattr(auth, 'hash', None),
+                            "device_model": getattr(auth, 'device_model', 'Unknown device'),
+                            "platform": getattr(auth, 'platform', 'Unknown platform'),
+                            "system_version": getattr(auth, 'system_version', ''),
+                            "app_name": getattr(auth, 'app_name', 'Telegram App'),
+                            "app_version": getattr(auth, 'app_version', ''),
+                            "ip": getattr(auth, 'ip', 'N/A'),
+                            "country": getattr(auth, 'country', 'N/A'),
+                            "region": getattr(auth, 'region', 'N/A'),
+                            "date_created": date_created_str,
+                            "date_active": date_active_str,
+                            "raw_date_active": date_active_dt
+                        }
+                        auth_records.append(record)
+
+                    auth_records.sort(
+                        key=lambda x: (not x["is_current"], -(x["raw_date_active"].timestamp() if x["raw_date_active"] else 0))
+                    )
+                    result["authorizations"] = auth_records
+
+                except asyncio.TimeoutError:
+                    result["status"] = "Timeout"
+                    result["error_message"] = "Telegram не ответил вовремя. Возможно, сессия повреждена или сеть медленная."
+                except (AuthKeyUnregisteredError, SessionRevokedError):
+                    result["status"] = "Dead / Revoked"
+                    result["error_message"] = "Ключ авторизации недействителен (сессия удалена)"
+                except (UserDeactivatedError, UserDeactivatedBanError):
+                    result["status"] = "Banned / Deactivated"
+                    result["error_message"] = "Аккаунт заблокирован или удален Telegram"
+                except SessionPasswordNeededError:
+                    result["status"] = "2FA Password Needed"
+                    result["error_message"] = "Требуется пароль двухфакторной аутентификации"
+                except FloodWaitError as e:
+                    result["status"] = "FloodWait"
+                    result["error_message"] = f"Лимит запросов Telegram, ожидание {e.seconds} сек."
+                except Exception as e:
+                    result["status"] = "Error"
+                    result["error_message"] = f"{type(e).__name__}: {str(e)}"
+                finally:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+        except Exception as e:
+            result["status"] = "Error"
+            result["error_message"] = f"{type(e).__name__}: {str(e)}"
         return result
 
     async def check_multiple_sessions(self, session_files: List[str], progress_callback=None) -> List[Dict[str, Any]]:
@@ -178,8 +187,10 @@ class SessionCheckerEngine:
             return res
 
         for f in session_files:
-            tasks.append(worker(f))
-        return list(await asyncio.gather(*tasks))
+            tasks.append(asyncio.create_task(worker(f)))
+
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+        return results
 
 
 def format_single_result_text(data: Dict[str, Any]) -> str:
