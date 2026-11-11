@@ -29,6 +29,8 @@ DEFAULT_API_HASH = os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627")
 MAX_SESSIONS_PER_BATCH = 1000
 CONCURRENCY_LIMIT = 8
 REQUEST_TIMEOUT_SECONDS = 25
+DISCONNECT_TIMEOUT_SECONDS = 5
+PROGRESS_TIMEOUT_SECONDS = 5
 
 # ----------------- ПРОВЕРКА БИБЛИОТЕК -----------------
 try:
@@ -86,7 +88,12 @@ class SessionCheckerEngine:
         client = None
         try:
             async with self.semaphore:
-                client = TelegramClient(session_str, self.api_id, self.api_hash)
+                client = TelegramClient(
+                    session_str, self.api_id, self.api_hash,
+                    flood_sleep_threshold=0,
+                    request_retries=1,
+                    connection_retries=1,
+                )
                 try:
                     await asyncio.wait_for(client.connect(), timeout=REQUEST_TIMEOUT_SECONDS)
                     if not await asyncio.wait_for(client.is_user_authorized(), timeout=REQUEST_TIMEOUT_SECONDS):
@@ -162,7 +169,9 @@ class SessionCheckerEngine:
                     result["error_message"] = f"{type(e).__name__}: {str(e)}"
                 finally:
                     try:
-                        await client.disconnect()
+                        await asyncio.wait_for(client.disconnect(), timeout=DISCONNECT_TIMEOUT_SECONDS)
+                    except asyncio.TimeoutError:
+                        logger.warning("Тайм-аут отключения сессии %s", session_file.name)
                     except Exception:
                         pass
         except Exception as e:
@@ -181,7 +190,7 @@ class SessionCheckerEngine:
             completed += 1
             if progress_callback:
                 try:
-                    await progress_callback(completed, total)
+                    await asyncio.wait_for(progress_callback(completed, total), timeout=PROGRESS_TIMEOUT_SECONDS)
                 except Exception:
                     pass
             return res
