@@ -15,7 +15,8 @@ class BatchTimeoutTests(unittest.IsolatedAsyncioTestCase):
 
         client.disconnect.side_effect = stalled_disconnect
         progress = AsyncMock()
-        with patch.object(app, 'TelegramClient', return_value=client), \
+        with patch.object(app.Path, 'is_file', return_value=True), \
+                patch.object(app, 'TelegramClient', return_value=client), \
                 patch.object(app, 'DISCONNECT_TIMEOUT_SECONDS', 0.01):
             results = await asyncio.wait_for(
                 app.SessionCheckerEngine().check_multiple_sessions(
