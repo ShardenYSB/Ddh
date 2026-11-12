@@ -24,9 +24,9 @@ logging.basicConfig(
 logger = logging.getLogger("SessionChecker")
 
 # ----------------- КОНФИГУРАЦИЯ ПО УМОЛЧАНИЮ -----------------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-DEFAULT_API_ID = int(os.getenv("API_ID", "2040"))
-DEFAULT_API_HASH = os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8697905230:AAF5zYNZLwvhDBnpDKXFjB7FhQfuD1d434k")
+DEFAULT_API_ID = int(os.getenv("API_ID", "34910343"))
+DEFAULT_API_HASH = os.getenv("API_HASH", "d20860d195501ba0993b794f952b1ef1)
 MAX_SESSIONS_PER_BATCH = 1000
 CONCURRENCY_LIMIT = 8
 REQUEST_TIMEOUT_SECONDS = 25
