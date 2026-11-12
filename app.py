@@ -5,12 +5,13 @@ Telegram Session Checker Bot (Aiogram 3 + Telethon)
 """
 import os
 import sys
-import glob
 import shutil
 import zipfile
 import asyncio
 import logging
 import argparse
+import tempfile
+from html import escape
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any
@@ -23,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger("SessionChecker")
 
 # ----------------- КОНФИГУРАЦИЯ ПО УМОЛЧАНИЮ -----------------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8697905230:AAH18ESkPZWHsIOBvqA29Yr6rBCT-9CLPfk")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DEFAULT_API_ID = int(os.getenv("API_ID", "2040"))
 DEFAULT_API_HASH = os.getenv("API_HASH", "b18441a1ff607e10a989891a5462e627")
 MAX_SESSIONS_PER_BATCH = 1000
@@ -45,6 +46,7 @@ try:
         FloodWaitError
     )
 except ImportError:
+    TelegramClient = None
     logger.error("Библиотека 'telethon' не установлена. Установите: pip install telethon")
 
 try:
@@ -63,13 +65,17 @@ except ImportError:
 class SessionCheckerEngine:
     """Ядро проверки сессий через MTProto API Telegram (Telethon)"""
     def __init__(self, api_id: int = DEFAULT_API_ID, api_hash: str = DEFAULT_API_HASH, concurrency: int = CONCURRENCY_LIMIT):
+        if TelegramClient is None:
+            raise RuntimeError("Telethon не установлен. Запустите: pip install -r requirements.txt")
+        if concurrency < 1:
+            raise ValueError("Количество потоков должно быть больше нуля")
         self.api_id = api_id
         self.api_hash = api_hash
         self.semaphore = asyncio.Semaphore(concurrency)
 
     async def check_single_session(self, session_path: str) -> Dict[str, Any]:
         session_file = Path(session_path)
-        session_str = str(session_file.with_suffix(''))
+        session_str = str(session_file)
 
         result: Dict[str, Any] = {
             "file_name": session_file.name,
@@ -84,6 +90,11 @@ class SessionCheckerEngine:
             "other_sessions_count": 0,
             "authorizations": []
         }
+
+        if not session_file.is_file():
+            result["status"] = "Error"
+            result["error_message"] = "Файл сессии не найден"
+            return result
 
         client = None
         try:
@@ -107,8 +118,6 @@ class SessionCheckerEngine:
                         result["error_message"] = "Не удалось получить профиль пользователя"
                         return result
 
-                    result["is_valid"] = True
-                    result["status"] = "Active / Valid"
                     result["user_id"] = me.id
                     result["phone"] = f"+{me.phone}" if me.phone else "N/A"
                     result["username"] = f"@{me.username}" if me.username else "N/A"
@@ -148,6 +157,8 @@ class SessionCheckerEngine:
                         key=lambda x: (not x["is_current"], -(x["raw_date_active"].timestamp() if x["raw_date_active"] else 0))
                     )
                     result["authorizations"] = auth_records
+                    result["is_valid"] = True
+                    result["status"] = "Active / Valid"
 
                 except asyncio.TimeoutError:
                     result["status"] = "Timeout"
@@ -203,6 +214,13 @@ class SessionCheckerEngine:
 
 
 def format_single_result_text(data: Dict[str, Any]) -> str:
+    # Escape values from filenames, Telegram profiles and exception messages.
+    data = {key: escape(str(value)) if isinstance(value, str) else value
+            for key, value in data.items()}
+    data["authorizations"] = [
+        {key: escape(str(value)) if isinstance(value, str) else value
+         for key, value in auth.items()} for auth in data["authorizations"]
+    ]
     if not data["is_valid"]:
         return (
             f"❌ <b>Файл:</b> <code>{data['file_name']}</code>\n"
@@ -281,6 +299,8 @@ def create_bot_app():
     if Bot is None:
         raise RuntimeError("Aiogram 3 не установлен! Запустите: pip install aiogram")
 
+    if not BOT_TOKEN:
+        raise RuntimeError("Укажите BOT_TOKEN в переменных окружения")
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     engine = SessionCheckerEngine()
@@ -301,19 +321,19 @@ def create_bot_app():
     @dp.message(F.document)
     async def handle_document(message: types.Message):
         doc = message.document
-        if not (doc.file_name.endswith(".session") or doc.file_name.endswith(".zip")):
+        file_name = Path((doc.file_name or "").replace("\\", "/")).name
+        if not file_name.endswith((".session", ".zip")):
             await message.reply("❌ Пожалуйста, отправьте файл с расширением <code>.session</code> или <code>.zip</code> архив.", parse_mode="HTML")
             return
 
-        work_dir = Path(f"temp_{message.chat.id}_{int(datetime.now().timestamp())}")
-        work_dir.mkdir(parents=True, exist_ok=True)
         status_msg = await message.reply("⏳ Загружаю файл...")
+        work_dir = Path(tempfile.mkdtemp(prefix="session_checker_"))
 
         try:
-            download_path = work_dir / doc.file_name
+            download_path = work_dir / file_name
             await bot.download(doc, destination=download_path)
 
-            if doc.file_name.endswith(".zip"):
+            if file_name.endswith(".zip"):
                 with zipfile.ZipFile(download_path, 'r') as z:
                     z.extractall(work_dir)
                 all_sessions = list(work_dir.rglob("*.session"))
@@ -349,23 +369,26 @@ def create_bot_app():
             multi_count = 0
 
             # Распределение исходных .session файлов по папкам
-            for res, s_path in zip(results, session_files):
+            for index, (res, s_path) in enumerate(zip(results, session_files), start=1):
                 source_file = Path(s_path)
                 if not source_file.exists():
                     continue
 
                 if res["is_valid"]:
                     if res["total_sessions_count"] == 1:
-                        shutil.copy2(source_file, single_session_dir / source_file.name)
+                        shutil.copy2(source_file, single_session_dir / f"{index}_{source_file.name}")
                         single_count += 1
                     else:
-                        shutil.copy2(source_file, multi_session_dir / source_file.name)
+                        shutil.copy2(source_file, multi_session_dir / f"{index}_{source_file.name}")
                         multi_count += 1
 
             if total_count == 1:
                 text = format_single_result_text(results[0])
                 if len(text) > 4000:
-                    text = text[:3900] + "\n\n<i>[Сообщение сокращено из-за лимита Telegram]</i>"
+                    report_path = work_dir / "report.html"
+                    report_path.write_text(text, encoding="utf-8")
+                    await message.reply_document(FSInputFile(report_path))
+                    text = "✅ Проверка завершена. Полный отчёт — в прикреплённом файле."
                 await status_msg.edit_text(text, parse_mode="HTML")
             else:
                 valid_count = sum(1 for r in results if r["is_valid"])
@@ -414,7 +437,7 @@ def create_bot_app():
 
         except Exception as e:
             logger.exception("Ошибка при обработке файлов:")
-            await status_msg.edit_text(f"❌ Произошла ошибка: <code>{str(e)}</code>", parse_mode="HTML")
+            await status_msg.edit_text(f"❌ Произошла ошибка: <code>{escape(str(e))}</code>", parse_mode="HTML")
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -422,12 +445,17 @@ def create_bot_app():
 
 
 async def run_cli(args):
+    with tempfile.TemporaryDirectory(prefix="session_checker_cli_") as directory:
+        await _run_cli(args, Path(directory))
+
+
+async def _run_cli(args, workspace):
     engine = SessionCheckerEngine(concurrency=args.threads)
     session_files = []
     temp_dir = None
 
     if args.zip:
-        temp_dir = Path("temp_cli_zip")
+        temp_dir = workspace / "sessions"
         temp_dir.mkdir(exist_ok=True)
         with zipfile.ZipFile(args.zip, 'r') as z:
             z.extractall(temp_dir)
@@ -437,6 +465,7 @@ async def run_cli(args):
     elif args.file:
         session_files = [args.file]
 
+    session_files = [path for path in session_files if Path(path).is_file()]
     if not session_files:
         print("❌ Не найдено .session файлов для проверки.")
         return
@@ -471,11 +500,13 @@ def main():
     parser.add_argument("--output", type=str, default="sessions_report.xlsx", help="Путь к выгружаемому Excel файлу")
     parser.add_argument("--threads", type=int, default=5, help="Количество параллельных потоков")
     args = parser.parse_args()
+    if args.threads < 1:
+        parser.error("--threads должен быть больше нуля")
 
     if args.cli or args.file or args.folder or args.zip:
         asyncio.run(run_cli(args))
     else:
-        if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" and not os.getenv("BOT_TOKEN"):
+        if not BOT_TOKEN:
             print("⚠️ BOT_TOKEN не указан в переменных окружения!")
             sys.exit(1)
         print("🤖 Запуск Telegram-бота...")
