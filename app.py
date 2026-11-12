@@ -56,6 +56,7 @@ except ImportError:
 
 try:
     from aiogram import Bot, Dispatcher, types, F
+    from aiogram.exceptions import TelegramUnauthorizedError
     from aiogram.filters import CommandStart
     from aiogram.types import FSInputFile
 except ImportError:
@@ -491,6 +492,20 @@ async def _run_cli(args, workspace):
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+async def run_bot():
+    bot, dp = create_bot_app()
+    try:
+        await dp.start_polling(bot, close_bot_session=False)
+    except TelegramUnauthorizedError:
+        raise RuntimeError(
+            "Telegram отклонил BOT_TOKEN (Unauthorized). "
+            "Получите действующий токен в @BotFather, замените BOT_TOKEN "
+            "в Railway → Variables и выполните Redeploy."
+        ) from None
+    finally:
+        await bot.session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Telegram Session Checker (Bot & CLI)")
     parser.add_argument("--cli", action="store_true", help="Запустить в консольном режиме")
@@ -510,8 +525,11 @@ def main():
             print("⚠️ BOT_TOKEN не указан в переменных окружения!")
             sys.exit(1)
         print("🤖 Запуск Telegram-бота...")
-        bot, dp = create_bot_app()
-        asyncio.run(dp.start_polling(bot))
+        try:
+            asyncio.run(run_bot())
+        except (RuntimeError, ValueError) as error:
+            print(f"❌ {error}", file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

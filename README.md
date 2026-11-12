@@ -29,3 +29,13 @@ python app.py --folder ./sessions
 ```sh
 python -m unittest discover -s tests -v
 ```
+
+## Railway: Unauthorized при запуске
+
+`TelegramUnauthorizedError: Telegram server says - Unauthorized` на вызове `get_me` означает, что Telegram не принимает токен бота.
+
+1. В Telegram откройте @BotFather и получите действующий токен нужного бота (`/token`; для замены опубликованного токена — `/revoke`).
+2. Railway → сервис бота → Variables → `BOT_TOKEN`: укажите только токен, без кавычек, пробелов и префикса `bot`. Переменная окружения имеет приоритет над значением в старом исходнике.
+3. Примените изменения и выполните Redeploy.
+
+В исходнике токен хранить не нужно. Обновление кода само по себе не исправляет отклонённый Telegram токен. Не публикуйте токен в чатах и логах.

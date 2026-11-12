@@ -78,3 +78,25 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn('a&lt;b&gt;.session', report)
         self.assertIn('bad &lt;tag&gt; &amp; value', report)
         self.assertEqual(result['file_name'], 'a<b>.session')
+
+
+class BotStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unauthorized_token_explains_railway_fix_and_closes_session(self):
+        from aiogram.exceptions import TelegramUnauthorizedError
+        from aiogram.methods import GetMe
+        bot = SimpleNamespace(session=SimpleNamespace(close=AsyncMock()))
+        dispatcher = SimpleNamespace(start_polling=AsyncMock(
+            side_effect=TelegramUnauthorizedError(method=GetMe(), message='Unauthorized')
+        ))
+        with patch.object(app, 'create_bot_app', return_value=(bot, dispatcher)):
+            with self.assertRaisesRegex(RuntimeError, 'BOT_TOKEN.*Railway'):
+                await app.run_bot()
+        bot.session.close.assert_awaited_once()
+
+    async def test_normal_shutdown_closes_session(self):
+        bot = SimpleNamespace(session=SimpleNamespace(close=AsyncMock()))
+        dispatcher = SimpleNamespace(start_polling=AsyncMock())
+        with patch.object(app, 'create_bot_app', return_value=(bot, dispatcher)):
+            await app.run_bot()
+        bot.session.close.assert_awaited_once()
+        dispatcher.start_polling.assert_awaited_once_with(bot, close_bot_session=False)
